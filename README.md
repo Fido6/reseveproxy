@@ -53,6 +53,24 @@ deno task start
 deno task dev
 ```
 
+## 部署
+
+### Deno Deploy
+
+项目已通过 [`deno.json`](deno.json:7) 的 `deploy.entryPoints` 声明入口点为 `./main.ts`，可直接连接仓库部署，无需额外 Build 步骤。
+
+### 其他 PaaS（需要 Build command 的平台）
+
+若平台（如某些容器托管）强制要求填写 Build command，可填入以下任一命令：
+
+```bash
+deno task build
+```
+
+该命令在 [`deno.json`](deno.json:5) 中定义为 `deno check main.ts`（类型检查），产出即本目录，无需二次构建。
+
+> 注意：平台通常是先执行 Build command，再执行 `deno task start` 或平台指定的 Start command（如 `deno run --allow-env --allow-net main.ts`）启动服务。请同时在平台环境变量中配置 `TARGET` / `PATH`（可选 `PORT`），它们会被注入到环境中供服务读取。
+
 ## 访问规则
 
 ### 白名单模式（`TARGET=https://api.aa.com`，`PATH=/v1/completion`）

@@ -1,7 +1,11 @@
 {
   "tasks": {
     "start": "deno run --allow-env --allow-net main.ts",
-    "dev": "deno run --watch --allow-env --allow-net main.ts"
+    "dev": "deno run --watch --allow-env --allow-net main.ts",
+    "build": "deno check main.ts"
+  },
+  "deploy": {
+    "entryPoints": ["./main.ts"]
   },
   "fmt": {
     "indentWidth": 2,
