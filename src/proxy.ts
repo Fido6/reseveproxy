@@ -1,30 +1,32 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-// Reverse proxy middleware
+// ── Reverse proxy via Next.js 16 "proxy" file convention ──────────────────
 // Env vars:
 //   TARGET        - Upstream base URL, e.g. "https://api.aa.com"
-//   PROXY_PATHS   - Comma-separated whitelist paths, e.g. "/v1/completion,/v1/chat"
-//   If PROXY_PATHS is empty/missing -> global proxy (all requests forwarded)
-//   If TARGET    is empty/missing   -> return 204
+//   PROXY_PATHS   - Comma-separated whitelist paths (exact match)
+//                    e.g. "/v1/completion,/v1/chat/completions"
+//
+// Behavior:
+//   TARGET empty/missing  → return 204
+//   PROXY_PATHS empty/missing → global proxy (all requests forwarded)
+//   PROXY_PATHS set       → only listed paths forwarded; others get 403
 
 const targetOrigin = (process.env.TARGET || "").trim();
 const rawPaths = (process.env.PROXY_PATHS || "").trim();
 
-// Parse whitelist paths: comma-separated, trimmed, non-empty
 const whitelistPaths = rawPaths
   ? rawPaths.split(",").map((p) => p.trim()).filter(Boolean)
   : [];
 
 const isGlobalProxy = whitelistPaths.length === 0 && targetOrigin.length > 0;
 
-export function middleware(request: NextRequest) {
-  // ── No TARGET: return 204 (nothing to proxy) ──────────────────────────
+export async function proxy(request: NextRequest) {
+  // ── No TARGET: nothing to proxy ────────────────────────────────────────
   if (!targetOrigin) {
     return new NextResponse(null, { status: 204 });
   }
 
-  // ── Ensure TARGET has a trailing slash ──────────────────────────────────
   const upstreamBase = targetOrigin.endsWith("/")
     ? targetOrigin
     : targetOrigin + "/";
@@ -46,7 +48,7 @@ export function middleware(request: NextRequest) {
   // ── Build upstream URL ─────────────────────────────────────────────────
   const upstreamUrl = `${upstreamBase}${pathname.replace(/^\//, "")}${queryString}`;
 
-  // ── Read request body (needed to rebuild the forwarded request) ────────
+  // ── Read request body ──────────────────────────────────────────────────
   let forwardedBody: BodyInit | null = null;
   const method = request.method.toUpperCase();
 
@@ -57,29 +59,23 @@ export function middleware(request: NextRequest) {
         forwardedBody = new Blob([bytes]);
       }
     } catch {
-      // If body cannot be read, proceed without one
+      // proceed without body
     }
   }
 
   // ── Build forwarded headers ────────────────────────────────────────────
   const forwardedHeaders = new Headers();
   for (const [key, value] of request.headers.entries()) {
-    // Skip hop-by-hop headers and headers that would cause issues
-    if (
-      key.toLowerCase() === "host" ||
-      key.toLowerCase().startsWith("x-") && key.toLowerCase() !== "x-forwarded-for"
-    ) {
+    if (key.toLowerCase() === "host") {
       continue;
     }
     forwardedHeaders.set(key, value);
   }
 
-  // Add forwarding hints
-  forwardedHeaders.set("x-forwarded-for", request.ip || "");
   forwardedHeaders.set("x-forwarded-host", request.headers.get("host") || "");
   forwardedHeaders.set("x-forwarded-proto", request.nextUrl.protocol.replace(":", ""));
 
-  // ── Forward request to upstream ────────────────────────────────────────
+  // ── Forward to upstream ────────────────────────────────────────────────
   try {
     const upstreamResp = await fetch(upstreamUrl, {
       method,
@@ -88,7 +84,6 @@ export function middleware(request: NextRequest) {
       redirect: "manual",
     });
 
-    // Collect upstream response headers (excluding hop-by-hop)
     const respHeaders: Record<string, string> = {};
     for (const [key, value] of upstreamResp.headers.entries()) {
       if (
@@ -100,7 +95,6 @@ export function middleware(request: NextRequest) {
       respHeaders[key] = value;
     }
 
-    // Read upstream body
     let bodyText = "";
     try {
       bodyText = await upstreamResp.text();
@@ -122,6 +116,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Run on all routes (so all env-var scenarios can be exercised)
   matcher: ["/"],
 };
